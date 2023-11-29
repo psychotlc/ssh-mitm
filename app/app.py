@@ -4,49 +4,69 @@ from flask_cors import CORS
 import json
 import subprocess
 
+from flask_socketio import SocketIO, emit
+
+from app.server.server import SSHConnection
+
 import asyncio
+from asyncio import CancelledError
 
 app = Flask(__name__)
 
 CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="http://127.0.0.1:8080")
 
+ssh_connection = None
 ssh_server = None
 
-@app.route("/start_server", methods=['POST'])
-async def start_server():
+async def start_ssh_server(params):
+    global ssh_connection
     global ssh_server
 
-    params = json.loads(request.data.decode('utf-8'))
-    server_port = params['server_port']
-    target_host = params['target_host']
-    target_port = params['target_port']
-    ssh_version = params['ssh_version']
-
-    args_to_pass = ['--port', server_port, '--target-host', target_host, '--target-port', target_port]
-
-    if ssh_version:
-        args_to_pass.extend(*['ssh-version', ssh_version])
-
-    file_to_run = "app/server/main.py"
+    server_port = int(params['serverPort'])
+    target_host = params['targetHost']
+    target_port = int(params['targetPort'])
+    ssh_version = params['sshVersion']
 
     try:
-        ssh_server = await asyncio.create_subprocess_exec('python', file_to_run, *args_to_pass)
-    except FileNotFoundError:
-        print(f"Error: File '{file_to_run}' not found.")
+        if ssh_server and not ssh_server.done():
+            ssh_server.cancel()
+            try:
+                await ssh_server
+            except CancelledError:
+                print("server turned off")
+                socketio.emit('log_from_server', 'server turned off')
+            
+            
+
+        socketio.emit('log_from_server', 'connection creating')
+        ssh_connection = SSHConnection(
+            client_port   = server_port,
+            target_host   = target_host,
+            target_port   = target_port,
+            ssh_version   = ssh_version,
+            emit_function = socketio.emit
+        )
+        socketio.emit('log_from_server', 'connection created')
+
+        socketio.emit('log_from_server', 'creating ssh server')
+
+        ssh_server = asyncio.create_task(ssh_connection.create_server())
+
+        await ssh_server
+    
     except Exception as e:
         print(f"An error occurred: {e}")
 
+@app.route("/start_server", methods=['POST'])
+async def start_server():
+    params = json.loads(request.data.decode('utf-8'))
+    
+    loop = asyncio.get_event_loop()
+    await loop.create_task(start_ssh_server(params))
+
+
     return {'success': 'ok'}
-
-@app.route("/stop_server", methods=['GET'])
-def stop_server():
-    global ssh_server
-
-    ssh_server.stop()
-
-    ssh_server = None
-
-    return {"success": "ok"}
 
 if __name__ == "__main__":
     app.run(debug=True)
