@@ -5,46 +5,74 @@
         .server-create-wrapper
             .server-create-toolbar
                 el-input(
-                    placeholder="server_port"
-                    v-model="filters.server_port"
+                    placeholder="serverPort"
+                    v-model="filters.serverPort"
                 )
                 el-input(
-                    placeholder="target_host"
-                    v-model="filters.target_host"
+                    placeholder="targetHost"
+                    v-model="filters.targetHost"
                 )
                 el-input(
-                    placeholder="target_port"
-                    v-model="filters.target_port"
+                    placeholder="targetPort"
+                    v-model="filters.targetPort"
                 )
                 el-input(
-                    placeholder="ssh_version"
-                    v-model="filters.ssh_version"
+                    placeholder="sshVersion"
+                    v-model="filters.sshVersion"
                 )
                 el-button(
                     type="primary"
                     @click="startServer()"
-                ) {{!server_started ? "Запустить" : "Остановить"}}
+                ) {{!serverStarted ? "Запустить" : "Остановить"}}
+        
+            .log-container 
+                span(ref="log")
         
 </template>
 
 <script>
+
+import io from 'socket.io-client';
 
 export default{
     name: 'server-index',
     data(){
         return{
             filters:{
-                server_port: null,
-                target_host: null,
-                target_port: null,
-                ssh_version: null,
+                serverPort: null,
+                targetHost: null,
+                targetPort: null,
+                sshVersion: null,
             },
-            server_started: false
+            serverStarted: false,
+            logData: ""
         }
     },
 
     methods: {
         startServer(){
+            if (!this.filters.serverPort){
+                this.$notify.error({
+                    title: 'Error',
+                    message: 'serverPort is required'
+                });
+                return
+            }
+            if (!this.filters.targetHost){
+                this.$notify.error({
+                    title: 'Error',
+                    message: 'targetHost is required'
+                });
+                return
+            }
+            if (!this.filters.targetPort){
+                this.$notify.error({
+                    title: 'Error',
+                    message: 'targetPort is required'
+                });
+                return
+            }
+            
             fetch(
                 'http://127.0.0.1:5000/start_server',
                 {
@@ -59,11 +87,27 @@ export default{
             }).then((res) => {
                 console.log(res)
             })
+            .catch((err) => {
+                console.error(err)
+            })
 
             
             
         }
-    }
+    },
+
+    mounted() {
+
+        const socket = io.connect('http://localhost:5000');
+
+        socket.on('log_from_server', (log) => {
+            this.logData += log + "<br>";
+
+            this.$refs.log.innerHTML = this.logData
+
+
+        });
+    },
 
 }
 </script>
